@@ -1,9 +1,10 @@
-lync message aggregation
-========================
+latencylog
+==========
 
-Messages submitted over the wire will arrive in the following format:
+Measures the time taken to establish a TCP connection to a remote host.
+
+Usage:
 
 ```
-user1:<uri>,user2:<uri>| message:from:<uri>,body:<base64 message> [...],at:<time>|header:start:<time>,end:<time>
+latencylog --host 1.1.1.1 --port 80
 ```
-
