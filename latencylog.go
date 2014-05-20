@@ -1,21 +1,26 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	"strings"
 	"time"
 )
 
 type Snapshot struct {
-	Start         time.Time
-	End           time.Time
-	Duration      time.Duration
-	Host          string
-	Port          int
-	LocalAddress  string
-	RemoteAddress string
+	Duration       float64   `json:"duration"`
+	DurationFormat string    `json:"durationformat"`
+	End            time.Time `json:"end"`
+	Host           string    `json:"host"`
+	Port           int       `json:"port"`
+	Start          time.Time `json:"start"`
+	LocalIP        string    `json:"localip"`
+	LocalPort      string    `json:"localport"`
 }
 
 var (
@@ -45,6 +50,7 @@ func main() {
 	snapshots = make([]*Snapshot, 0)
 
 	tickChan := time.NewTicker(time.Second * 1)
+	client := &http.Client{}
 
 	go func() {
 		for _ = range tickChan.C {
@@ -56,7 +62,16 @@ func main() {
 
 			snapshots = append(snapshots, res)
 
-			log.Printf("%v, %s <--> %s", res.Duration, res.LocalAddress, res.RemoteAddress)
+			b, err := json.Marshal(res)
+
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			buf := bytes.NewBufferString(string(b))
+			client.Post("http://10.127.144.40:4151/put?topic=latencylog", "application/json", buf)
+
+			log.Printf("%v, %s:%d", res.Duration, res.Host, res.Port)
 		}
 	}()
 
@@ -70,7 +85,7 @@ func main() {
 		log.Printf("Snapshots: %d", len(snapshots))
 
 		for _, v := range snapshots {
-			total += v.Duration.Seconds() * 1e3
+			total += v.Duration
 		}
 
 		avg := total / float64(len(snapshots))
@@ -92,13 +107,14 @@ func run(host string, port int) (*Snapshot, error) {
 	dur := end.Sub(start)
 
 	snap := &Snapshot{
-		Start:         start,
-		End:           end,
-		Duration:      dur,
-		Host:          host,
-		Port:          port,
-		LocalAddress:  c.LocalAddr().String(),
-		RemoteAddress: c.RemoteAddr().String(),
+		Start:          start,
+		End:            end,
+		Duration:       dur.Seconds() * 1e3,
+		DurationFormat: "ms",
+		Host:           host,
+		Port:           port,
+		LocalIP:        strings.Split(c.LocalAddr().String(), ":")[0],
+		LocalPort:      strings.Split(c.LocalAddr().String(), ":")[1],
 	}
 
 	if err := c.Close(); err != nil {
