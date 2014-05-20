@@ -19,14 +19,29 @@ type Snapshot struct {
 }
 
 var (
-	host      = flag.String("host", "", "Target IP to connect to")
-	port      = flag.Int("port", 0, "Target port to connect to")
-	duration  = flag.Duration("duration", 1, "How long to run for (minutes)")
+	host      = flag.String("host", "", "Target IP to connect to. Required")
+	port      = flag.Int("port", 0, "Target port to connect to. Required")
+	duration  = flag.Int("duration", 1, "How long to run for (minutes)")
 	snapshots []*Snapshot
 )
 
 func main() {
 	flag.Parse()
+
+	if len(*host) == 0 {
+		fmt.Println("Host required")
+
+		flag.PrintDefaults()
+		return
+	}
+
+	if *port == 0 {
+		fmt.Println("Port required")
+
+		flag.PrintDefaults()
+		return
+	}
+
 	snapshots = make([]*Snapshot, 0)
 
 	tickChan := time.NewTicker(time.Second * 1)
@@ -45,7 +60,9 @@ func main() {
 		}
 	}()
 
-	time.Sleep(*duration * time.Minute)
+	sleepFor, _ := time.ParseDuration(fmt.Sprintf("%dm", *duration))
+	log.Printf("Running for: %s", sleepFor)
+	time.Sleep(sleepFor)
 	tickChan.Stop()
 
 	if len(snapshots) > 0 {
