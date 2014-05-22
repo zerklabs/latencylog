@@ -11,8 +11,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	// "github.com/bitly/nsq/util"
 )
 
 type Snapshot struct {
