@@ -28,26 +28,18 @@ type Snapshot struct {
 }
 
 var (
-	host     = flag.String("host", "", "Target IP to connect to. Required")
-	port     = flag.Int("port", 0, "Target port to connect to. Required")
-	duration = flag.Int("duration", 1, "How long to run for (minutes)")
-	nsqHost  = flag.String("nsq-http-address", "", "The NSQ target HTTP server")
-	nsqPort  = flag.Int("nsq-http-port", 4151, "The NSQ target HTTP server port")
-	nsqPath  = flag.String("nsq-http-path", "/put", "The URI path for the NSQ publisher")
-	nsqSSL   = flag.Bool("nsq-https", false, "Use HTTPS for NSQ connection? (Default: true)")
-	nsqTopic = flag.String("nsq-topic", "latencylog", "Specify the topic used in NSQ")
+	host        = flag.String("host", "", "Target IP to connect to. Required")
+	port        = flag.Int("port", 0, "Target port to connect to. Required")
+	duration    = flag.Int("duration", 1, "How long to run for (minutes)")
+	httpAddress = flag.String("http-address", "", "The target HTTP server")
+	httpPath    = flag.String("http-path", "/put", "The URI path for the NSQ publisher")
+	httpSSL     = flag.Bool("use-https", false, "Use HTTPS?")
 
-	// nsqdTCPAddrs = util.StringArray{}
-
-	useNsq = false
-	nsqUri = ""
+	useHttp = false
+	httpUri = ""
 
 	snapshots []*Snapshot
 )
-
-// func init() {
-// 	flag.Var(&nsqdTCPAddrs, "nsqd-tcp-address", "nsqd TCP address (may be given multiple times)")
-// }
 
 func main() {
 	flag.Parse()
@@ -66,14 +58,14 @@ func main() {
 		return
 	}
 
-	if len(*nsqHost) > 0 {
-		useNsq = true
-		nsqUri = fmt.Sprintf("%s:%d%s?topic=%s", *nsqHost, *nsqPort, *nsqPath, *nsqTopic)
+	if len(*httpAddress) > 0 {
+		useHttp = true
+		httpUri = fmt.Sprintf("%s%s", *httpAddress, *httpPath)
 
-		if *nsqSSL {
-			nsqUri = "https://" + nsqUri
+		if *httpSSL {
+			httpUri = "https://" + httpUri
 		} else {
-			nsqUri = "http://" + nsqUri
+			httpUri = "http://" + httpUri
 		}
 	}
 
@@ -97,7 +89,7 @@ func main() {
 
 			snapshots = append(snapshots, res)
 
-			if useNsq {
+			if useHttp {
 				b, err := json.Marshal(res)
 
 				if err != nil {
@@ -105,7 +97,7 @@ func main() {
 				}
 
 				buf := bytes.NewBufferString(string(b))
-				_, err = client.Post(nsqUri, "application/json", buf)
+				_, err = client.Post(httpUri, "application/json", buf)
 
 				if err != nil {
 					log.Printf("HTTP Error: %s", err)
