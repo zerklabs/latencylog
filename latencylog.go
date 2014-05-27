@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,31 +27,25 @@ type Snapshot struct {
 }
 
 var (
-	host        = flag.String("host", "", "Target IP to connect to. Required")
-	port        = flag.Int("port", 0, "Target port to connect to. Required")
-	duration    = flag.Int("duration", 1, "How long to run for (minutes)")
-	httpAddress = flag.String("http-address", "", "The target HTTP server")
-	httpPath    = flag.String("http-path", "/put", "The URI path for the NSQ publisher")
-	httpSSL     = flag.Bool("use-https", false, "Use HTTPS?")
-
-	useHttp = false
-	httpUri = ""
-
 	snapshots []*Snapshot
 )
 
 func main() {
+	var (
+		tcpAddress  = flag.String("tcp-address", "", "Target IP:PORT to connect to")
+		duration    = flag.Int("duration", 1, "How long to run for (minutes)")
+		httpAddress = flag.String("http-address", "", "The target HTTP server")
+		httpPath    = flag.String("http-path", "/put", "The URI path for the NSQ publisher")
+		httpSSL     = flag.Bool("use-https", false, "Use HTTPS?")
+
+		useHttp = false
+		httpUri = ""
+	)
+
 	flag.Parse()
 
-	if len(*host) == 0 {
-		fmt.Println("Host required")
-
-		flag.PrintDefaults()
-		return
-	}
-
-	if *port == 0 {
-		fmt.Println("Port required")
+	if len(*tcpAddress) == 0 {
+		fmt.Println("IP:PORT required")
 
 		flag.PrintDefaults()
 		return
@@ -79,7 +74,10 @@ func main() {
 
 	go func() {
 		for _ = range tickChan.C {
-			res, err := run(*host, *port)
+			host := strings.Split(*tcpAddress, ":")[0]
+			port, _ := strconv.Atoi(strings.Split(*tcpAddress, ":")[1])
+
+			res, err := run(host, port)
 
 			if err != nil {
 				log.Fatal(err)
@@ -111,6 +109,10 @@ func main() {
 	time.Sleep(sleepFor)
 	tickChan.Stop()
 
+	aggregate(snapshots, *duration)
+}
+
+func aggregate(snapshots []*Snapshot, duration int) {
 	if len(snapshots) > 0 {
 		total := float64(0)
 		log.Printf("Snapshots: %d", len(snapshots))
@@ -120,7 +122,7 @@ func main() {
 		}
 
 		avg := total / float64(len(snapshots))
-		log.Printf("Average after %d minute(s) and %d checks: %vms", *duration, len(snapshots), avg)
+		log.Printf("Average after %d minute(s) and %d checks: %vms", duration, len(snapshots), avg)
 	}
 }
 
