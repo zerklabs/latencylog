@@ -29,6 +29,9 @@ var (
 	snapshots []*Snapshot
 	client    *http.Client
 	db        *influxdb.Client
+
+	sourceSite string
+	destSite   string
 )
 
 func main() {
@@ -38,6 +41,8 @@ func main() {
 		influxDatabase   = flag.String("influxdb-database", "", "InfluxDB Database")
 		influxdbUsername = flag.String("influxdb-username", "", "InfluxDB Username")
 		influxdbPassword = flag.String("influxdb-password", "", "InfluxDB Password")
+		sourceLocation   = flag.String("source-location", "UNKN", "4 character site or region code")
+		destLocation     = flag.String("dest-location", "UNKN", "4 character site or region code")
 		duration         = flag.Int("duration", 1, "How long to run for (minutes)")
 		err              error
 	)
@@ -74,6 +79,9 @@ func main() {
 		flag.PrintDefaults()
 		return
 	}
+
+	sourceSite = *sourceLocation
+	destSite = *destLocation
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -130,9 +138,9 @@ func aggregate(snapshots []*Snapshot, duration int) {
 		for _, v := range snapshots {
 			total += v.Duration
 			series = append(series, &influxdb.Series{
-				Name:    "measurements",
-				Columns: []string{"source", "sourceport", "destination", "destinationport", "duration", "status", "start", "end", "proto"},
-				Points:  [][]interface{}{{v.LocalIP, v.LocalPort, v.Host, v.Port, v.Duration, v.Status, v.Start, v.End, v.Proto}},
+				Name:    fmt.Sprintf("%s_%s_latency", sourceSite, destSite),
+				Columns: []string{"source", "destination", "destinationport", "duration", "status", "proto"},
+				Points:  [][]interface{}{{v.LocalIP, v.Host, v.Port, v.Duration, v.Status, v.Proto}},
 			})
 		}
 
