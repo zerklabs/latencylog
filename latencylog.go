@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ type Snapshot struct {
 	Duration         float64   `json:"duration"`
 	DurationFormat   string    `json:"durationformat"`
 	DistanceEstimate string    `json:"distanceestimate"`
+	Status           int       `json:"status"`
 	End              time.Time `json:"end"`
 	Host             string    `json:"host"`
 	Port             int       `json:"port"`
@@ -28,6 +30,11 @@ type Snapshot struct {
 
 var (
 	snapshots []*Snapshot
+
+	httpUri = ""
+	useHttp = false
+
+	client *http.Client
 )
 
 func main() {
@@ -37,9 +44,6 @@ func main() {
 		httpAddress = flag.String("http-address", "", "The target HTTP server")
 		httpPath    = flag.String("http-path", "/put", "The URI path for the NSQ publisher")
 		httpSSL     = flag.Bool("use-https", false, "Use HTTPS?")
-
-		useHttp = false
-		httpUri = ""
 	)
 
 	flag.Parse()
@@ -70,7 +74,7 @@ func main() {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
-	client := &http.Client{Transport: tr}
+	client = &http.Client{Transport: tr}
 
 	go func() {
 		for _ = range tickChan.C {
@@ -83,24 +87,10 @@ func main() {
 				log.Fatal(err)
 			}
 
-			snapshots = append(snapshots, res)
-
-			if useHttp {
-				b, err := json.Marshal(res)
-
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				buf := bytes.NewBufferString(string(b))
-				_, err = client.Post(httpUri, "application/json", buf)
-
-				if err != nil {
-					log.Printf("HTTP Error: %s", err)
-				}
-			}
-
+			go record(res)
 			log.Printf("%v, %s:%d", res.Duration, res.Host, res.Port)
+
+			snapshots = append(snapshots, res)
 		}
 	}()
 
@@ -110,6 +100,26 @@ func main() {
 	tickChan.Stop()
 
 	aggregate(snapshots, *duration)
+}
+
+func record(snapshot *Snapshot) {
+	if useHttp {
+		b, err := json.Marshal(snapshot)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		newUrl := url.Values{}
+		newUrl.Add("u")
+
+		buf := bytes.NewBufferString(string(b))
+		_, err = client.Post(httpUri, "application/json", buf)
+
+		if err != nil {
+			log.Printf("HTTP Error: %s", err)
+		}
+	}
 }
 
 func aggregate(snapshots []*Snapshot, duration int) {
@@ -127,35 +137,51 @@ func aggregate(snapshots []*Snapshot, duration int) {
 }
 
 func run(host string, port int) (*Snapshot, error) {
-	start := time.Now()
+	snap := &Snapshot{}
+
+	snap.DurationFormat = "ms"
+	snap.Host = host
+	snap.Port = port
+
+	snap.Start = time.Now()
 	c, err := net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
 
 	if err != nil {
-		return &Snapshot{}, err
+		snap.Status = 0
+		snap.End = time.Now()
+		return snap, err
 	}
 
 	c.Write(make([]byte, 8))
 
-	end := time.Now()
-	dur := end.Sub(start)
+	snap.End = time.Now()
+	dur := snap.End.Sub(snap.Start)
 
-	snap := &Snapshot{
-		Start:          start,
-		End:            end,
-		Duration:       dur.Seconds() * 1e3,
-		DurationFormat: "ms",
-		Host:           host,
-		Port:           port,
-		LocalIP:        strings.Split(c.LocalAddr().String(), ":")[0],
-		LocalPort:      strings.Split(c.LocalAddr().String(), ":")[1],
-	}
+	snap.Duration = dur.Seconds() * 1e3
+	snap.LocalIP = strings.Split(c.LocalAddr().String(), ":")[0]
+	snap.LocalPort = strings.Split(c.LocalAddr().String(), ":")[1]
+	snap.Status = 1
 
-	if snap.Duration < float64(10) {
-		snap.DistanceEstimate = "near"
-	} else if snap.Duration > float64(40) {
-		snap.DistanceEstimate = "far"
+	if snap.Duration <= float64(10) {
+		snap.DistanceEstimate = "sub10ms"
+	} else if snap.Duration <= float64(20) {
+		snap.DistanceEstimate = "sub20ms"
+	} else if snap.Duration <= float64(30) {
+		snap.DistanceEstimate = "sub30ms"
+	} else if snap.Duration <= float64(40) {
+		snap.DistanceEstimate = "sub40ms"
+	} else if snap.Duration <= float64(50) {
+		snap.DistanceEstimate = "sub50ms"
+	} else if snap.Duration <= float64(60) {
+		snap.DistanceEstimate = "sub60ms"
+	} else if snap.Duration <= float64(70) {
+		snap.DistanceEstimate = "sub70ms"
+	} else if snap.Duration <= float64(80) {
+		snap.DistanceEstimate = "sub80ms"
+	} else if snap.Duration <= float64(90) {
+		snap.DistanceEstimate = "sub90ms"
 	} else {
-		snap.DistanceEstimate = "close"
+		snap.DistanceEstimate = "above90ms"
 	}
 
 	if err := c.Close(); err != nil {
