@@ -35,6 +35,8 @@ var (
 )
 
 func main() {
+	defaultDuration, _ := time.ParseDuration("1m1s")
+
 	var (
 		tcpAddress       = flag.String("tcp-address", "", "Target IP:PORT to connect to")
 		influxdbAddress  = flag.String("influxdb-address", "", "InfluxDB Host")
@@ -43,7 +45,8 @@ func main() {
 		influxdbPassword = flag.String("influxdb-password", "", "InfluxDB Password")
 		sourceLocation   = flag.String("source-location", "UNKN", "4 character site or region code")
 		destLocation     = flag.String("dest-location", "UNKN", "4 character site or region code")
-		duration         = flag.Int("duration", 1, "How long to run for (minutes)")
+		useTLS           = flag.Bool("enable-tls", false, "Enable TLS")
+		duration         = flag.Duration("duration", defaultDuration, "How long to run for (minutes)")
 		err              error
 	)
 
@@ -87,14 +90,18 @@ func main() {
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
-	client = &http.Client{Transport: tr}
+	if *useTLS {
+		client = &http.Client{Transport: tr}
+	} else {
+		client = &http.Client{}
+	}
 
 	influxConfig := &influxdb.ClientConfig{
 		Host:       *influxdbAddress,
 		Database:   *influxDatabase,
 		Username:   *influxdbUsername,
 		Password:   *influxdbPassword,
-		IsSecure:   true,
+		IsSecure:   *useTLS,
 		HttpClient: client,
 	}
 
@@ -104,14 +111,13 @@ func main() {
 		panic(err)
 	}
 
-	runFor, _ := time.ParseDuration(fmt.Sprintf("%dm", *duration))
-	log.Printf("Running for: %s", runFor)
+	log.Printf("Running for: %s", *duration)
 
 	snapshots = make([]*Snapshot, 0)
 	resChan := make(chan *Snapshot)
 
 	tickChan := time.NewTicker(time.Second * 1)
-	timeChan := time.NewTimer(runFor).C
+	timeChan := time.NewTimer(*duration).C
 
 	for {
 		select {
@@ -129,7 +135,7 @@ func main() {
 	}
 }
 
-func aggregate(snapshots []*Snapshot, duration int) {
+func aggregate(snapshots []*Snapshot, duration time.Duration) {
 	if len(snapshots) > 0 {
 		series := make([]*influxdb.Series, 0)
 		total := float64(0)
@@ -145,7 +151,7 @@ func aggregate(snapshots []*Snapshot, duration int) {
 		}
 
 		avg := total / float64(len(snapshots))
-		log.Printf("Average after %d minute(s) and %d checks: %vms", duration, len(snapshots), avg)
+		log.Printf("Average after %s and %d checks: %vms", duration, len(snapshots), avg)
 
 		err := db.WriteSeries(series)
 		if err != nil {
