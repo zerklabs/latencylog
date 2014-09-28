@@ -4,13 +4,16 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/influxdb/influxdb-go"
+	"github.com/miekg/dns"
 	"github.com/zerklabs/auburn/logging"
 	"github.com/zerklabs/auburn/utils"
 )
@@ -226,16 +229,14 @@ func runTCP(host string, port int, resChan chan *Snapshot) {
 	snap.Start = time.Now()
 
 	c, err := net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
-	snap.LocalIP, snap.LocalPort = utils.ParseNetAddress(c.LocalAddr().String())
-
 	if err != nil {
 		snap.End = time.Now()
 		resChan <- snap
 		return
 	}
+	snap.LocalIP, snap.LocalPort = utils.ParseNetAddress(c.LocalAddr().String())
 
 	_, err = c.Write(make([]byte, 8))
-
 	if err != nil {
 		snap.LocalIP, snap.LocalPort = utils.ParseNetAddress(c.LocalAddr().String())
 		snap.End = time.Now()
@@ -292,8 +293,8 @@ func runWeb(address string, resChan chan *Snapshot) {
 	snap.Status = 0
 	snap.Start = time.Now()
 
-	resp, err := httpClient.Get(address)
-	defer resp.Body.Close()
+	res, err := httpClient.Get(address)
+	defer res.Body.Close()
 	if err != nil {
 		log.Error(err)
 		snap.End = time.Now()
@@ -301,8 +302,12 @@ func runWeb(address string, resChan chan *Snapshot) {
 		return
 	}
 
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Error(err)
+	}
+
 	// finalize the snapshot
-	snap.Status = 1
 	snap.End = time.Now()
 	dur := snap.End.Sub(snap.Start)
 	snap.Duration = dur.Seconds() * 1e3
@@ -311,19 +316,61 @@ func runWeb(address string, resChan chan *Snapshot) {
 	snap.Status = 1
 
 	resChan <- snap
+
+	log.Debugf("Body contained %d bytes", len(body))
 }
 
 func runDns(dnsServer string, query string, resChan chan *Snapshot) {
+	isIp := false
+	var err error
 	var host string
 	var port int
-	var snap Snapshot
+	snap := &Snapshot{}
 
 	host, port = utils.ParseNetAddress(dnsServer)
+	if port == 0 {
+		port = 53
+		dnsServer = fmt.Sprintf("%s:%d", host, port)
+	}
+
+	isIp, err = regexp.MatchString("\b(?:\\d{1,3}\\.){3}\\d{1,3}\b", query)
+	if err != nil {
+		log.Error(err)
+	}
+
+	if !isIp {
+		query = dns.Fqdn(query)
+	}
 
 	snap.Host = host
 	snap.Port = port
-	snap.Proto = "TCP"
+	snap.Proto = "DNS"
 	snap.Duration = float64(0)
 	snap.Status = 0
 	snap.Start = time.Now()
+
+	dnsClient := &dns.Client{}
+	m := new(dns.Msg)
+	if isIp {
+		m.SetQuestion(query, dns.TypeANY)
+	} else {
+		m.SetQuestion(query, dns.TypeA)
+	}
+
+	_, _, err = dnsClient.Exchange(m, dnsServer)
+	if err != nil {
+		log.Error(err)
+	}
+
+	//log.Debug(r.String())
+	snap.End = time.Now()
+	dur := snap.End.Sub(snap.Start)
+	snap.Duration = dur.Seconds() * 1e3
+	//log.Debugf("RTT duration: %v", rtt.Seconds()*1e3)
+	snap.LocalIP = "127.0.0.1"
+	snap.LocalPort = 0
+	snap.Status = 1
+
+	resChan <- snap
+
 }
